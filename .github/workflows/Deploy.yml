@@ -51,7 +51,7 @@ jobs:
                 aws s3 cp s3://'${S3_BUCKET}'/releases/deploy-latest.zip /tmp/d.zip,
                 unzip -o /tmp/d.zip -d '${DEPLOY_DIR}',
                 cp '${DEPLOY_DIR}/frontend/index.html' '${DEPLOY_DIR}',
-                cp -rf '${DEPLOY_DIR}/*' /opt/app/
+                cp -rf '${DEPLOY_DIR}/*' /opt/app/,
                 nginx -t && systemctl reload nginx,
                 chmod +x /opt/app/gradlew,
                 cd /opt/app/,
