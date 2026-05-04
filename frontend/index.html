@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3-Tier HA Lab — 재고 관리</title>
+<style>
+  /* ─── 기본 리셋 ──── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #f4f6f8; min-height: 100vh; color: #2c3e50;
+  }
+
+  /* ─── 헤더 ──────── */
+  header {
+    background: #fff; border-bottom: 2px solid #FF9900;
+    padding: 14px 24px; display: flex; align-items: center; gap: 16px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.06);
+  }
+  header h1 { font-size: 20px; font-weight: 700; color: #FF9900; }
+  header .sub { font-size: 12px; color: #888; }
+
+  /* ─── 서버 정보 배너 ─ */
+  #server-banner {
+    background: #1565A0; color: #fff;
+    padding: 8px 24px; font-size: 12px;
+    display: flex; gap: 24px; align-items: center;
+  }
+  #server-banner span { opacity: .85; }
+  #server-banner .ip  { font-weight: 700; font-family: monospace;
+                        color: #FFD54F; font-size: 13px; }
+  .lb-badge {
+    background: #2ecc71; color: #fff;
+    padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 600;
+    animation: pulse 1.5s infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.6} }
+
+  /* ─── 컨테이너 ─────── */
+  .container { max-width: 960px; margin: 24px auto; padding: 0 16px; }
+
+  /* ─── 알림 ─────────── */
+  .alert {
+    padding: 12px 16px; border-radius: 8px; margin-bottom: 16px;
+    font-size: 14px; display: none;
+  }
+  .alert.show { display: block; }
+  .alert-err  { background: #fdecea; border-left: 4px solid #e74c3c; color: #c0392b; }
+  .alert-ok   { background: #eafaf1; border-left: 4px solid #2ecc71; color: #27ae60; }
+
+  /* ─── 폼 카드 ────────── */
+  .card {
+    background: #fff; border-radius: 12px; padding: 20px 24px;
+    box-shadow: 0 2px 12px rgba(0,0,0,.07); margin-bottom: 20px;
+  }
+  .card h2 { font-size: 15px; font-weight: 600; margin-bottom: 14px; color: #1565A0; }
+  .form-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .form-row input {
+    flex: 1; min-width: 160px; border: 1.5px solid #ddd;
+    border-radius: 8px; padding: 9px 12px; font-size: 14px;
+    outline: none; transition: border-color .2s;
+  }
+  .form-row input:focus { border-color: #1565A0; }
+  .btn {
+    padding: 9px 20px; border: none; border-radius: 8px;
+    font-size: 14px; font-weight: 600; cursor: pointer; transition: .15s;
+  }
+  .btn-blue  { background: #1565A0; color: #fff; }
+  .btn-blue:hover  { background: #0d4780; }
+  .btn-green { background: #27ae60; color: #fff; }
+  .btn-green:hover { background: #1e8449; }
+  .btn-red   { background: #e74c3c; color: #fff; }
+  .btn-red:hover   { background: #c0392b; }
+  .btn-gray  { background: #bdc3c7; color: #fff; }
+  .btn-gray:hover  { background: #95a5a6; }
+  .btn-sm { padding: 5px 12px; font-size: 12px; }
+
+  /* ─── 테이블 ─────────── */
+  .tbl-wrap { overflow-x: auto; }
+  table {
+    width: 100%; border-collapse: collapse; font-size: 14px;
+  }
+  thead th {
+    background: #f0f4f8; padding: 11px 14px; text-align: left;
+    font-weight: 600; color: #555; border-bottom: 2px solid #e0e6ed;
+    white-space: nowrap;
+  }
+  tbody tr { border-bottom: 1px solid #eef0f3; transition: background .1s; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: #f9fbfd; }
+  td { padding: 10px 14px; vertical-align: middle; }
+  .stock-low  { color: #e74c3c; font-weight: 700; }
+  .stock-ok   { color: #27ae60; font-weight: 600; }
+  .server-ip  {
+    font-family: monospace; font-size: 12px;
+    background: #f0f4f8; padding: 2px 8px; border-radius: 4px;
+    color: #1565A0;
+  }
+  .actions    { display: flex; gap: 6px; }
+
+  /* ─── 인라인 재고 수정 ─ */
+  .stock-edit { display: flex; gap: 6px; align-items: center; }
+  .stock-edit input {
+    width: 72px; border: 1.5px solid #1565A0; border-radius: 6px;
+    padding: 4px 8px; font-size: 13px; text-align: center;
+  }
+
+  /* ─── 통계 배지 ──────── */
+  .stats {
+    display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap;
+  }
+  .stat {
+    background: #fff; border-radius: 10px; padding: 14px 20px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.06); flex: 1; min-width: 130px;
+    text-align: center;
+  }
+  .stat .val { font-size: 26px; font-weight: 700; color: #1565A0; }
+  .stat .lbl { font-size: 12px; color: #888; margin-top: 2px; }
+  .stat.warn .val { color: #e74c3c; }
+
+  /* ─── API 테스트 패널 ─── */
+  .api-panel { background: #1a2233; border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+  .api-panel h3 { color: #9DC3E6; font-size: 13px; margin-bottom: 12px; }
+  .api-log {
+    font-family: monospace; font-size: 12px; color: #c5cae9;
+    max-height: 180px; overflow-y: auto; line-height: 1.6;
+  }
+  .api-log .req  { color: #FFD54F; }
+  .api-log .res  { color: #80CBC4; }
+  .api-log .err  { color: #EF9A9A; }
+  .api-log .info { color: #A5D6A7; }
+
+  .empty {
+    text-align: center; padding: 48px 0; color: #bbb; font-size: 14px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>🛒 재고 관리 시스템</h1>
+    <div class="sub">3-Tier HA Lab — Next.js(FE) · Spring Boot(BE) · MySQL(DB) - 배포버전 </div>
+  </div>
+</header>
+
+<!-- 서버 정보 배너 — 로드밸런싱 확인 -->
+<div id="server-banner">
+  <span>🖥 응답 서버 IP: <span class="ip" id="svr-ip">조회 중...</span></span>
+  <span>📍 호스트: <span id="svr-host">—</span></span>
+  <span>🕐 <span id="svr-time">—</span></span>
+  <span class="lb-badge" id="lb-badge" style="display:none">LB 전환 감지!</span>
+</div>
+
+<div class="container">
+
+  <!-- 알림 -->
+  <div class="alert alert-err" id="alert-err"></div>
+  <div class="alert alert-ok"  id="alert-ok"></div>
+
+  <!-- 통계 -->
+  <div class="stats">
+    <div class="stat">
+      <div class="val" id="stat-total">—</div>
+      <div class="lbl">전체 상품 수</div>
+    </div>
+    <div class="stat">
+      <div class="val" id="stat-stock">—</div>
+      <div class="lbl">총 재고 수량</div>
+    </div>
+    <div class="stat warn">
+      <div class="val" id="stat-low">—</div>
+      <div class="lbl">재고 부족 (≤10)</div>
+    </div>
+  </div>
+
+  <!-- 상품 추가 폼 -->
+  <div class="card">
+    <h2>+ 새 상품 등록</h2>
+    <div class="form-row">
+      <input type="text"   id="inp-name"  placeholder="상품명 (예: Kubernetes Guide)">
+      <input type="number" id="inp-stock" placeholder="초기 재고 수량" min="0">
+      <button class="btn btn-blue" onclick="createProduct()">등록</button>
+    </div>
+  </div>
+
+  <!-- 상품 목록 -->
+  <div class="card">
+    <h2>📦 상품 목록
+      <button class="btn btn-gray btn-sm" style="float:right"
+              onclick="loadProducts()">↻ 새로고침</button>
+    </h2>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>상품명</th>
+            <th>재고</th>
+            <th>응답 서버 IP</th>
+            <th>등록일시</th>
+            <th>작업</th>
+          </tr>
+        </thead>
+        <tbody id="product-table">
+          <tr><td colspan="6" class="empty">로딩 중...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- API 테스트 패널 -->
+  <div class="api-panel">
+    <h3>🔌 API 요청 로그 — 서버 응답 실시간 확인</h3>
+    <div class="api-log" id="api-log">
+      <div class="info">// 상품 목록을 불러오는 중...</div>
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+<script>
+// ── 설정 ──────────────────────────────────────────────────────
+// ALB DNS 또는 BE ALB DNS로 변경하세요.
+// 브라우저가 직접 Spring Boot를 호출하는 경우:
+const API_BASE = window.location.origin;  // Nginx가 /api 경로를 프록시
+// Spring Boot 직접 호출 시:
+// const API_BASE = 'http://[BE-ALB-DNS]:8080';
+
+// ── 상태 ──────────────────────────────────────────────────────
+let prevServerIp = null;
+
+// ── 유틸리티 ─────────────────────────────────────────────────
+function showErr(msg) {
+  const el = document.getElementById('alert-err');
+  el.textContent = '❌ ' + msg; el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 4000);
+}
+function showOk(msg) {
+  const el = document.getElementById('alert-ok');
+  el.textContent = '✅ ' + msg; el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 3000);
+}
+function log(type, msg) {
+  const box = document.getElementById('api-log');
+  const div = document.createElement('div');
+  div.className = type;
+  div.textContent = '[' + new Date().toLocaleTimeString('ko-KR') + '] ' + msg;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+  // 최대 50줄 유지
+  while (box.children.length > 50) box.removeChild(box.firstChild);
+}
+function fmt(dateStr) {
+  if (!dateStr) return '—';
+  return new Date(dateStr).toLocaleString('ko-KR', {
+    dateStyle:'short', timeStyle:'short'
+  });
+}
+
+// ── API 공통 호출 ─────────────────────────────────────────────
+async function callApi(method, path, body) {
+  const url = API_BASE + path;
+  log('req', method + ' ' + path + (body ? '  ' + JSON.stringify(body) : ''));
+  const opt = {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+  };
+  if (body) opt.body = JSON.stringify(body);
+  const res = await fetch(url, opt);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: 'HTTP ' + res.status }));
+    throw new Error(err.message || 'HTTP ' + res.status);
+  }
+  if (res.status === 204) { log('res', '→ 204 No Content'); return null; }
+  const data = await res.json();
+  log('res', '→ ' + JSON.stringify(data).slice(0, 120) + (JSON.stringify(data).length > 120 ? '...' : ''));
+  return data;
+}
+
+// ── 서버 정보 갱신 ───────────────────────────────────────────
+async function refreshServerInfo() {
+  try {
+    const info = await callApi('GET', '/api/server-info');
+    document.getElementById('svr-ip').textContent   = info.serverIp;
+    document.getElementById('svr-host').textContent = info.hostname;
+    document.getElementById('svr-time').textContent = new Date(info.timestamp).toLocaleTimeString('ko-KR');
+
+    // 로드밸런싱 전환 감지
+    if (prevServerIp && prevServerIp !== info.serverIp) {
+      const badge = document.getElementById('lb-badge');
+      badge.style.display = 'inline-block';
+      badge.textContent   = 'LB 전환! ' + prevServerIp + ' → ' + info.serverIp;
+      log('info', '🔀 로드밸런싱 전환 감지: ' + prevServerIp + ' → ' + info.serverIp);
+      setTimeout(() => { badge.style.display = 'none'; }, 5000);
+    }
+    prevServerIp = info.serverIp;
+  } catch (e) {
+    document.getElementById('svr-ip').textContent = '연결 오류';
+  }
+}
+
+// ── 상품 목록 로드 ────────────────────────────────────────────
+async function loadProducts() {
+  try {
+    const products = await callApi('GET', '/api/products');
+    await refreshServerInfo();
+
+    // 통계 계산
+    const total    = products.length;
+    const sumStock = products.reduce((a, p) => a + p.stock, 0);
+    const lowCount = products.filter(p => p.stock <= 10).length;
+    document.getElementById('stat-total').textContent = total;
+    document.getElementById('stat-stock').textContent = sumStock.toLocaleString();
+    document.getElementById('stat-low').textContent   = lowCount;
+
+    // 테이블 렌더링
+    const tbody = document.getElementById('product-table');
+    if (products.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty">등록된 상품이 없습니다.<br>위 폼에서 상품을 추가하세요.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = products.map(p => `
+      <tr>
+        <td>${p.id}</td>
+        <td><strong>${p.name}</strong></td>
+        <td>
+          <div class="stock-edit">
+            <input type="number" id="stock-${p.id}" value="${p.stock}" min="0">
+            <button class="btn btn-green btn-sm"
+                    onclick="updateStock(${p.id})">변경</button>
+          </div>
+          <span class="${p.stock <= 10 ? 'stock-low' : 'stock-ok'}">
+            현재: ${p.stock}${p.stock <= 10 ? ' ⚠️' : ''}
+          </span>
+        </td>
+        <td><span class="server-ip">${p.serverIp || '—'}</span></td>
+        <td>${fmt(p.createdAt)}</td>
+        <td class="actions">
+          <button class="btn btn-red btn-sm"
+                  onclick="deleteProduct(${p.id}, '${p.name}')">삭제</button>
+        </td>
+      </tr>
+    `).join('');
+
+  } catch (e) {
+    showErr('목록 로드 실패: ' + e.message);
+    log('err', '❌ ' + e.message);
+  }
+}
+
+// ── 상품 생성 ─────────────────────────────────────────────────
+async function createProduct() {
+  const name  = document.getElementById('inp-name').value.trim();
+  const stock = parseInt(document.getElementById('inp-stock').value);
+  if (!name)      { showErr('상품명을 입력하세요.'); return; }
+  if (isNaN(stock) || stock < 0) { showErr('재고 수량을 올바르게 입력하세요.'); return; }
+  try {
+    await callApi('POST', '/api/products', { name, stock });
+    document.getElementById('inp-name').value  = '';
+    document.getElementById('inp-stock').value = '';
+    showOk('"' + name + '" 상품이 등록되었습니다.');
+    loadProducts();
+  } catch (e) {
+    showErr('등록 실패: ' + e.message);
+    log('err', '❌ ' + e.message);
+  }
+}
+
+// ── 재고 수정 ─────────────────────────────────────────────────
+async function updateStock(id) {
+  const qty = parseInt(document.getElementById('stock-' + id).value);
+  if (isNaN(qty) || qty < 0) { showErr('올바른 수량을 입력하세요.'); return; }
+  try {
+    await callApi('PATCH', `/api/products/${id}/stock?quantity=${qty}`);
+    showOk('재고가 ' + qty + '(으)로 변경되었습니다.');
+    loadProducts();
+  } catch (e) {
+    showErr('수정 실패: ' + e.message);
+    log('err', '❌ ' + e.message);
+  }
+}
+
+// ── 상품 삭제 ─────────────────────────────────────────────────
+async function deleteProduct(id, name) {
+  if (!confirm('"' + name + '"을(를) 삭제하시겠습니까?')) return;
+  try {
+    await callApi('DELETE', '/api/products/' + id);
+    showOk('"' + name + '" 삭제 완료.');
+    loadProducts();
+  } catch (e) {
+    showErr('삭제 실패: ' + e.message);
+    log('err', '❌ ' + e.message);
+  }
+}
+
+// ── 초기 실행 ─────────────────────────────────────────────────
+loadProducts();
+// 10초마다 자동 새로고침 (서버 IP 변화 감지)
+setInterval(loadProducts, 10000);
+</script>
+</body>
+</html>
